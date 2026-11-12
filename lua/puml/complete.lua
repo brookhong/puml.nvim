@@ -47,7 +47,9 @@ function source:complete(_, callback)
   for _, n in ipairs(parse.names(d.body)) do
     table.insert(items, { label = n, kind = K.Variable, detail = d.type .. " name" })
   end
-  for _, it in ipairs(catalog.items_for(d.type)) do
+  -- snippets that fit the grammar on the line being typed
+  local row = vim.api.nvim_win_get_cursor(0)[1]
+  for _, it in ipairs((require("puml.feasible").insertable(d, row))) do
     table.insert(items, {
       label = it.label,
       filterText = it.label:gsub("[^%w]+", " "),

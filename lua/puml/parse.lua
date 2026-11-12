@@ -241,8 +241,16 @@ local end_kw = set({ "loop", "alt", "opt", "par", "break", "critical", "group" }
 
 local function opener(ll)
   local w = ll:match("^([%a_]+)")
+  if ll:match("^<style>") and not ll:match("</style>") then
+    return "style"
+  end
   if ll:match("{%s*$") then
     return "brace"
+  end
+  -- multi-line title / header / footer (a bare keyword on its own line)
+  if ll == "title" or ll == "header" or ll == "footer" or ll:match("^left%s+header$") or ll:match("^right%s+header$")
+    or ll:match("^center%s+header$") or ll:match("^left%s+footer$") or ll:match("^right%s+footer$") or ll:match("^center%s+footer$") then
+    return ll:match("(%a+)$")
   end
   if not w then
     return nil
@@ -274,7 +282,15 @@ local function opener(ll)
 end
 
 local function closer(ll)
-  if ll:match("^}") then
+  if ll:match("^</style>") then
+    return "style"
+  elseif ll:match("^end%s*title") then
+    return "title"
+  elseif ll:match("^end%s*header") then
+    return "header"
+  elseif ll:match("^end%s*footer") then
+    return "footer"
+  elseif ll:match("^}") then
     return "brace"
   elseif ll:match("^endif") or ll:match("^end%s+if") then
     return "if"

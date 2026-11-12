@@ -19,6 +19,9 @@ M.defaults = {
     per_type = { sequence = "text" },
     auto_default = "image",
     text_format = "utxt", -- "utxt" (unicode box drawing) | "txt" (plain ascii)
+    -- Draw activity diagrams in text mode with the built-in renderer (PlantUML's text
+    -- output for them has no boxes or arrows). false = use PlantUML's output as-is.
+    builtin_text = true,
     image_format = "png", -- "png" | "svg"
     image_dir = nil, -- default: stdpath("cache") .. "/puml"
   },
@@ -29,8 +32,23 @@ M.defaults = {
   },
 
   keymaps = {
-    prefix = "<leader>u", -- set to false to disable all default keymaps
-    textobjects = { inner = "iu", outer = "au" }, -- set to false to disable
+    -- The only default mapping (normal + visual): opens the menu of everything that makes
+    -- sense at the cursor / selection. false = no mapping (use :PumlMenu).
+    menu = "<leader>u",
+    -- Opt-in text objects for the enclosing block, e.g. { inner = "iu", outer = "au" }.
+    textobjects = false,
+  },
+
+  -- Pickers (menu, insert, connect, wrap, templates): "labels" = foyer-style popup where each
+  -- choice has a one-key label (mnemonic when possible; `/` filters), "select" = vim.ui.select.
+  picker = {
+    ui = "labels",
+    selection_hint = true, -- in visual mode, show the wrap blocks + labels beside the selection
+    -- Labels for wrap blocks. In linewise visual (V) they are live keys while the hint shows,
+    -- so only keys of little use there (in-line / word motions, q, m, z); never j/k/G/{/}/o/
+    -- y/d/c/x/p/>/</=/:/n/i/a/...).
+    selection_keys = "lhwebftqmzWBEFTQK",
+    characters = "asdfghjklqwertyuiopzxcvbnm1234567890ASDFGHJKLQWERTYUIOPZXCVBNM", -- allowed labels
   },
 
   connect = {
@@ -61,6 +79,14 @@ function M.setup(opts)
   end
   if opts and opts.preview and opts.preview.events then
     M.options.preview.events = opts.preview.events
+  end
+  -- old config: `keymaps.prefix` now names the menu key
+  local km = opts and opts.keymaps
+  if type(km) == "table" and km.menu == nil and km.prefix ~= nil then
+    M.options.keymaps.menu = km.prefix
+  end
+  if km == false then
+    M.options.keymaps = { menu = false, textobjects = false }
   end
   return M.options
 end

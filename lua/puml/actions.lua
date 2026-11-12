@@ -4,6 +4,7 @@ local util = require("puml.util")
 local parse = require("puml.parse")
 local catalog = require("puml.catalog")
 local render = require("puml.render")
+local picker = require("puml.picker")
 
 local M = {}
 
@@ -50,6 +51,15 @@ local function insertion_point(buf, d)
   return row, indent, util.trim(lines[row] or "") == ""
 end
 
+--- Buffer line the new statement will occupy (it goes before that line), see insert_snippet.
+function M.insertion_line(buf, d)
+  local row, _, blank = insertion_point(buf, d)
+  if blank and row == vim.api.nvim_win_get_cursor(0)[1] then
+    return row
+  end
+  return row + 1
+end
+
 --- Insert a snippet body on a new line below the cursor (or on the current line if blank).
 function M.insert_snippet(body, buf)
   buf = buf or vim.api.nvim_get_current_buf()
@@ -78,11 +88,13 @@ function M.expand(body, indent, buf)
 end
 
 local function pick_item(items, prompt, cb)
-  vim.ui.select(items, {
+  picker.select(items, {
     prompt = prompt,
     format_item = function(it)
-      local first = it.body:gsub("\n.*", " …"):gsub("%${%d+|([^,|]*)[^}]*}", "%1"):gsub("%${%d+:?([^}]*)}", "%1"):gsub("%$%d", "")
-      return string.format("%-26s %s", it.label, first)
+      return it.label
+    end,
+    detail = function(it)
+      return picker.snippet(it.body)
     end,
   }, function(it)
     if it then
@@ -99,16 +111,20 @@ function M.insert(id)
   if not d then
     return
   end
-  local items = catalog.items_for(d.type)
-  if #items == 0 then
-    return util.notify("no elements known for diagram type " .. d.type, vim.log.levels.WARN)
-  end
+  -- only what fits the grammar where the new line goes
+  local items, why = require("puml.feasible").insertable(d, M.insertion_line(buf, d))
   if id and id ~= "" then
     local it = catalog.find(d.type, id)
     if not it then
       return util.notify("unknown element '" .. id .. "' for " .. d.type, vim.log.levels.WARN)
     end
+    if not vim.tbl_contains(items, it) then
+      return util.notify("can't insert " .. it.label .. " here", vim.log.levels.WARN)
+    end
     return M.insert_snippet(it.body, buf)
+  end
+  if #items == 0 then
+    return util.notify("can't insert here: " .. (why or "nothing fits"), vim.log.levels.WARN)
   end
   pick_item(items, "Insert " .. d.type .. " element", function(it)
     M.insert_snippet(it.body, buf)
@@ -119,7 +135,12 @@ local NEW = "+ new name…"
 
 local function pick_name(names, prompt, cb)
   local choices = vim.list_extend(vim.deepcopy(names), { NEW })
-  vim.ui.select(choices, { prompt = prompt }, function(choice)
+  picker.select(choices, {
+    prompt = prompt,
+    key = function(c)
+      return c == NEW and "+" or nil
+    end,
+  }, function(choice)
     if not choice then
       return
     end
@@ -149,6 +170,11 @@ local function add_direction(arrow, dir)
   return s
 end
 
+--- Whether connecting two nodes with an arrow makes sense for `typ`.
+function M.can_connect(typ)
+  return not (typ == "activity" or typ == "mindmap" or typ == "wbs" or typ == "gantt")
+end
+
 --- Connect two nodes: pick from, to, arrow style, (direction), label.
 function M.connect()
   local buf = vim.api.nvim_get_current_buf()
@@ -156,7 +182,7 @@ function M.connect()
   if not d then
     return
   end
-  if d.type == "activity" or d.type == "mindmap" or d.type == "wbs" or d.type == "gantt" then
+  if not M.can_connect(d.type) then
     return util.notify("connect is not applicable to " .. d.type .. " diagrams; use insert instead", vim.log.levels.WARN)
   end
   local names = parse.names(d.body)
@@ -169,7 +195,7 @@ function M.connect()
       table.insert(to_names, from) -- self message last
     end
     pick_name(to_names, "To (from " .. from .. ")", function(to)
-      vim.ui.select(catalog.arrows_for(d.type), {
+      picker.select(catalog.arrows_for(d.type), {
         prompt = "Arrow " .. from .. " ? " .. to,
         format_item = function(a)
           return a.label
@@ -205,7 +231,12 @@ function M.connect()
           end)
         end
         if d.type ~= "sequence" and config.options.connect.ask_direction then
-          vim.ui.select({ "(auto)", "up", "down", "left", "right" }, { prompt = "Direction" }, function(dir)
+          picker.select({ "(auto)", "up", "down", "left", "right" }, {
+            prompt = "Direction",
+            key = function(x)
+              return ({ ["(auto)"] = "a", up = "k", down = "j", left = "h", right = "l" })[x]
+            end,
+          }, function(dir)
             if dir == nil then
               return
             end
@@ -226,9 +257,9 @@ function M.wrap_range(s, e, label)
   if not d then
     return util.notify("selection is not inside a PlantUML diagram", vim.log.levels.WARN)
   end
-  local wraps = catalog.wraps_for(d.type)
+  local wraps, why = require("puml.feasible").wraps(d, s, e)
   if #wraps == 0 then
-    return util.notify("no blocks known for diagram type " .. d.type, vim.log.levels.WARN)
+    return util.notify("can't wrap: " .. (why or "no blocks for " .. d.type), vim.log.levels.WARN)
   end
   local function apply(w)
     local function go(answer)
@@ -283,10 +314,23 @@ function M.wrap_range(s, e, label)
         return apply(w)
       end
     end
+    for _, w in ipairs(catalog.wraps_for(d.type)) do
+      if w.label == label or catalog.slug(w.label) == label then
+        return util.notify("can't wrap this selection in " .. w.label, vim.log.levels.WARN)
+      end
+    end
     return util.notify("unknown block '" .. label .. "' for " .. d.type, vim.log.levels.WARN)
   end
-  vim.ui.select(wraps, {
+  picker.select(wraps, {
     prompt = "Wrap " .. (e - s + 1) .. " line(s) in",
+    detail = function(w)
+      return picker.desc(w.desc)
+    end,
+    -- exactly where the selection hint was (beside the selection), with its labels
+    chars = require("puml.hint").keys(),
+    place = function(w, h)
+      return require("puml.hint").place(s, e, w, h)
+    end,
     format_item = function(w)
       return w.label
     end,
@@ -295,27 +339,6 @@ function M.wrap_range(s, e, label)
       apply(w)
     end
   end)
-end
-
--- operatorfunc for `<prefix>w{motion}`
-function M.wrap_op(_)
-  local s = vim.api.nvim_buf_get_mark(0, "[")[1]
-  local e = vim.api.nvim_buf_get_mark(0, "]")[1]
-  M.wrap_range(s, e)
-end
-
-function M.wrap_operator()
-  vim.o.operatorfunc = "v:lua.require'puml.actions'.wrap_op"
-  return "g@"
-end
-
-function M.wrap_visual()
-  local s, e = vim.fn.line("v"), vim.fn.line(".")
-  if s > e then
-    s, e = e, s
-  end
-  vim.api.nvim_feedkeys(vim.keycode("<Esc>"), "nx", false)
-  M.wrap_range(s, e)
 end
 
 --- Insert a new diagram from a template.
@@ -357,7 +380,12 @@ function M.new(typ)
   if typ and typ ~= "" then
     return apply(typ)
   end
-  vim.ui.select(catalog.template_order, { prompt = "New diagram" }, function(t)
+  picker.select(catalog.template_order, {
+    prompt = "New diagram",
+    detail = function(t)
+      return catalog.template_desc[t]
+    end,
+  }, function(t)
     if t then
       apply(t)
     end

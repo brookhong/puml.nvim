@@ -3,9 +3,7 @@ if vim.g.loaded_puml then
 end
 vim.g.loaded_puml = true
 
-vim.filetype.add({
-  extension = { puml = "plantuml", plantuml = "plantuml", pu = "plantuml", iuml = "plantuml", wsd = "plantuml" },
-})
+-- filetype detection: ftdetect/plantuml.lua
 
 local function puml()
   return require("puml")
@@ -58,6 +56,22 @@ end, {
   end,
   desc = "Set preview mode",
 })
+
+cmd("PumlMenu", function(o)
+  puml().attach(0)
+  require("puml.menu").open(0, o.range > 0 and { o.line1, o.line2 } or nil)
+end, { range = true, desc = "Menu of all puml actions" })
+
+cmd("PumlCatalog", function()
+  vim.cmd.enew()
+  local buf = vim.api.nvim_get_current_buf()
+  vim.bo[buf].buftype, vim.bo[buf].bufhidden, vim.bo[buf].swapfile = "nofile", "wipe", false
+  pcall(vim.api.nvim_buf_set_name, buf, "puml-catalog")
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, require("puml.catalog").mindmap())
+  vim.bo[buf].filetype = "plantuml"
+  puml().attach(buf)
+  require("puml.preview").open(buf)
+end, { desc = "Mindmap of diagram types and their available items" })
 
 cmd("PumlInsert", function(o)
   require("puml.actions").insert(o.args)

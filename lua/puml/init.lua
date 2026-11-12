@@ -37,26 +37,19 @@ function M.attach(buf, force)
     require("puml.complete").register_cmp()
   end
   local preview = require("puml.preview")
-  local actions = require("puml.actions")
   preview.attach(buf)
+  require("puml.hint").attach(buf)
 
   if vim.bo[buf].filetype == "plantuml" then
     vim.bo[buf].omnifunc = "v:lua.require'puml.complete'.omnifunc"
   end
 
+  -- One key: the menu of everything that makes sense at the cursor / selection.
   local km = config.options.keymaps
-  if km and km.prefix then
-    local p = km.prefix
-    map(buf, "n", p .. "p", function() preview.toggle(buf) end, "toggle preview")
-    map(buf, "n", p .. "r", function() preview.render(buf, { force = true }) end, "render now")
-    map(buf, "n", p .. "m", function() preview.cycle_mode(buf) end, "cycle preview mode (auto/text/image)")
-    map(buf, "n", p .. "i", function() actions.insert() end, "insert element")
-    map(buf, "n", p .. "c", function() actions.connect() end, "connect two nodes")
-    map(buf, "n", p .. "w", actions.wrap_operator, "wrap {motion} in block", { expr = true })
-    map(buf, "n", p .. "ww", function() local r = vim.fn.line("."); actions.wrap_range(r, r) end, "wrap line in block")
-    map(buf, "x", p .. "w", actions.wrap_visual, "wrap selection in block")
-    map(buf, "n", p .. "n", function() actions.new() end, "new diagram from template")
-    map(buf, "n", p .. "e", function() actions.export() end, "export diagram")
+  if km and km.menu then
+    local menu = require("puml.menu")
+    map(buf, "n", km.menu, function() menu.open(buf) end, "menu")
+    map(buf, "x", km.menu, menu.open_visual, "menu (selection)")
   end
   local to = km and km.textobjects
   if to then

@@ -4,7 +4,8 @@ local M = {}
 
 local common = {
   { label = "title", body = "title ${1:Title}" },
-  { label = "note (floating)", body = 'note "${1:text}" as ${2:N1}' },
+  -- `note "…" as N` is not valid in sequence and activity diagrams
+  { label = "note (floating)", body = 'note "${1:text}" as ${2:N1}', not_in = { sequence = true, activity = true } },
   { label = "skinparam", body = "skinparam ${1:monochrome} ${2:true}" },
   { label = "theme", body = "!theme ${1:plain}" },
   { label = "header", body = "header ${1:text}" },
@@ -144,7 +145,7 @@ M.items = {
     { label = "choice", body = "state ${1:choice} <<choice>>" },
     { label = "fork", body = "state ${1:fork} <<fork>>" },
     { label = "join", body = "state ${1:join} <<join>>" },
-    { label = "history", body = "[H]" },
+    { label = "history", body = "${1:State} --> ${2:Composite}[H]" },
     { label = "note", body = "note ${1|right,left|} of ${2:State}: ${0:text}" },
   },
   object = {
@@ -208,137 +209,66 @@ M.arrows = {
 }
 
 -- Wrap blocks per type. `%s` in open/close lines is replaced with the user's answer to `prompt`.
-local brace = function(kw)
-  return { label = kw, open = kw .. " %s {", close = "}", prompt = kw .. " name", default = "name" }
+-- `desc` is shown next to the label in the hint and the picker.
+local brace = function(kw, desc)
+  return { label = kw, open = kw .. " %s {", close = "}", prompt = kw .. " name", default = "name", desc = desc }
 end
 
 M.wraps = {
   sequence = {
-    { label = "loop", open = "loop %s", close = "end", prompt = "loop condition" },
-    { label = "alt / else", open = "alt %s", mid = { "else" }, close = "end", prompt = "if condition" },
-    { label = "opt", open = "opt %s", close = "end", prompt = "opt condition" },
-    { label = "par", open = "par", mid = { "else" }, close = "end" },
-    { label = "break", open = "break %s", close = "end", prompt = "break condition" },
-    { label = "critical", open = "critical %s", close = "end", prompt = "critical section" },
-    { label = "group", open = "group %s", close = "end", prompt = "group label" },
-    { label = "box", open = 'box "%s"', close = "end box", prompt = "box title" },
-    { label = "activate / deactivate", open = "activate %s", close = "deactivate %s", prompt = "participant" },
+    { label = "loop", open = "loop %s", close = "end", prompt = "loop condition", desc = "repeat while {condition} holds" },
+    { label = "alt / else", open = "alt %s", mid = { "else" }, close = "end", prompt = "if condition", desc = "if {condition}, else the other branch" },
+    { label = "opt", open = "opt %s", close = "end", prompt = "opt condition", desc = "only if {condition} holds" },
+    { label = "par", open = "par", mid = { "else" }, close = "end", desc = "branches run in parallel" },
+    { label = "break", open = "break %s", close = "end", prompt = "break condition", desc = "if {condition}: this, then stop" },
+    { label = "critical", open = "critical %s", close = "end", prompt = "critical section", desc = "{section} runs without interruption" },
+    { label = "group", open = "group %s", close = "end", prompt = "group label", desc = "a frame labelled {label}" },
+    { label = "box", open = 'box "%s"', close = "end box", prompt = "box title", desc = "a box titled {title} around them" },
+    { label = "activate / deactivate", open = "activate %s", close = "deactivate %s", prompt = "participant", desc = "mark {participant}'s lifeline active" },
   },
   activity = {
-    { label = "if / else", open = "if (%s?) then (yes)", mid = { "else (no)" }, close = "endif", prompt = "condition" },
-    { label = "if (no else)", open = "if (%s?) then (yes)", close = "endif", prompt = "condition" },
-    { label = "while", open = "while (%s?) is (yes)", close = "endwhile (no)", prompt = "condition" },
-    { label = "repeat", open = "repeat", close = "repeat while (%s?) is (yes)", prompt = "condition" },
-    { label = "fork", open = "fork", mid = { "fork again" }, close = "end fork" },
-    { label = "split", open = "split", mid = { "split again" }, close = "end split" },
-    { label = "partition", open = "partition %s {", close = "}", prompt = "partition name" },
-    { label = "group", open = "group %s", close = "end group", prompt = "group name" },
+    { label = "if / else", open = "if (%s?) then (yes)", mid = { "else (no)" }, close = "endif", prompt = "condition", desc = "if {condition}: yes, else no" },
+    { label = "if (no else)", open = "if (%s?) then (yes)", close = "endif", prompt = "condition", desc = "only if {condition} holds" },
+    { label = "while", open = "while (%s?) is (yes)", close = "endwhile (no)", prompt = "condition", desc = "loop while {condition}, test first" },
+    { label = "repeat", open = "repeat", close = "repeat while (%s?) is (yes)", prompt = "condition", desc = "loop while {condition}, test after" },
+    { label = "fork", open = "fork", mid = { "fork again" }, close = "end fork", desc = "parallel branches, then join" },
+    { label = "split", open = "split", mid = { "split again" }, close = "end split", desc = "parallel branches, no join" },
+    { label = "partition", open = "partition %s {", close = "}", prompt = "partition name", desc = "a frame of steps named {name}" },
+    { label = "group", open = "group %s", close = "end group", prompt = "group name", desc = "a frame labelled {name}" },
   },
   structural = {
-    brace("package"),
-    brace("namespace"),
-    brace("rectangle"),
-    brace("node"),
-    brace("folder"),
-    brace("frame"),
-    brace("cloud"),
-    brace("component"),
-    { label = "together", open = "together {", close = "}" },
+    brace("package", "a tabbed folder named {name}"),
+    brace("namespace", "names inside get {name}. prefix"),
+    brace("rectangle", "a plain box named {name}"),
+    brace("node", "a machine/device {name} (3D box)"),
+    brace("folder", "a folder named {name}"),
+    brace("frame", "a frame tagged {name}"),
+    brace("cloud", "a cloud named {name}"),
+    brace("component", "a component {name} holding these"),
+    { label = "together", open = "together {", close = "}", desc = "keep them side by side (layout)" },
   },
   state = {
-    { label = "composite state", open = "state %s {", close = "}", prompt = "state name" },
+    { label = "composite state", open = "state %s {", close = "}", prompt = "state name", desc = "a state {name} made of sub-states" },
   },
 }
 
--- Templates for :PumlNew
-M.templates = {
-  sequence = [[
-@startuml
-actor User
-participant API
-database DB
+-- One-line description per template, for the "New diagram" picker.
+M.template_desc = {
+  sequence = "messages between participants over time",
+  class = "classes, their members and relations",
+  activity = "a flow of steps with branches and loops",
+  usecase = "actors and what they can do with a system",
+  component = "components and how they depend on each other",
+  state = "states and the transitions between them",
+  object = "instances and their links at one moment",
+  mindmap = "ideas branching out from a root",
+  wbs = "work breakdown: a project split into tasks",
+  gantt = "tasks on a timeline",
+  empty = "an empty @startuml … @enduml",
+}
 
-User -> API: request
-API -> DB: query
-DB --> API: rows
-API --> User: response
-@enduml]],
-  class = [[
-@startuml
-class Animal {
-  +name: String
-  +speak(): void
-}
-class Dog
-Animal <|-- Dog
-@enduml]],
-  activity = [[
-@startuml
-start
-:step;
-if (ok?) then (yes)
-  :continue;
-else (no)
-  :handle error;
-endif
-stop
-@enduml]],
-  usecase = [[
-@startuml
-left to right direction
-actor User
-rectangle System {
-  (Login)
-}
-User --> (Login)
-@enduml]],
-  component = [[
-@startuml
-[Frontend] --> [Backend]
-database DB
-[Backend] --> DB
-@enduml]],
-  state = [[
-@startuml
-[*] --> Idle
-Idle --> Running : start
-Running --> Idle : stop
-Running --> [*]
-@enduml]],
-  object = [[
-@startuml
-object user {
-  name = "Alice"
-}
-object order
-user --> order
-@enduml]],
-  mindmap = [[
-@startmindmap
-* Root
-** Branch A
-*** Leaf
-** Branch B
-@endmindmap]],
-  wbs = [[
-@startwbs
-* Project
-** Phase 1
-*** Task
-** Phase 2
-@endwbs]],
-  gantt = [[
-@startgantt
-Project starts 2025-01-01
-[Design] requires 5 days
-[Build] requires 10 days
-[Build] starts at [Design]'s end
-@endgantt]],
-  empty = [[
-@startuml
-${0}
-@enduml]],
-}
+-- Templates for :PumlNew: every element of the type, see templates.lua
+M.templates = require("puml.templates")
 
 M.template_order = { "sequence", "class", "activity", "usecase", "component", "state", "object", "mindmap", "wbs", "gantt", "empty" }
 
@@ -356,7 +286,11 @@ function M.items_for(typ)
     return list
   end
   vim.list_extend(list, user.common or {})
-  vim.list_extend(list, common)
+  for _, it in ipairs(common) do
+    if not (it.not_in and it.not_in[typ]) then
+      table.insert(list, it)
+    end
+  end
   return list
 end
 
@@ -381,6 +315,97 @@ function M.find(typ, id)
       return it
     end
   end
+end
+
+--- PlantUML mindmap of diagram type -> available actions/items, generated
+--- from this catalog (including user `catalog` config), so it never goes stale.
+--- One multi-line box per action (keeps the image small); shared items are shown once.
+--- @return string[] lines
+function M.mindmap()
+  local user = require("puml.config").options.catalog or {}
+  local can_connect = require("puml.actions").can_connect
+  local shared_list = vim.list_extend(vim.list_extend({}, user.common or {}), common)
+  local shared = {}
+  for _, it in ipairs(shared_list) do
+    shared[it.label] = true
+  end
+  local out = { "@startmindmap", "* puml.nvim" }
+  -- collapse whitespace and escape creole markup (`--` strike, `**` bold, `//`, `__`, `""`)
+  local function clean(t)
+    return (t:gsub("%s+", " "):gsub('[-*/_"]', "~%0"))
+  end
+  local function branch(level, title, list, extra)
+    if #list == 0 then
+      return
+    end
+    -- multi-line node, a few items per row
+    table.insert(out, string.rep("*", level) .. ":<b>" .. title .. "</b> (" .. #list .. ")")
+    local row = {}
+    local function flush()
+      if #row > 0 then
+        table.insert(out, table.concat(row, "  ·  "))
+        row = {}
+      end
+    end
+    for _, x in ipairs(list) do
+      table.insert(row, clean(x.label))
+      if #table.concat(row, "  ·  ") > 48 then
+        flush()
+      end
+    end
+    flush()
+    if extra then
+      table.insert(out, extra)
+    end
+    out[#out] = out[#out] .. ";"
+  end
+  local types = vim.tbl_filter(function(t)
+    return M.templates[t] and t ~= "empty"
+  end, M.template_order)
+  -- which shared items each type gets (some are left out per type, see `not_in`)
+  local users = {} -- shared label -> types using it
+  for i, typ in ipairs(types) do
+    if i == math.floor(#types / 2) + 1 then
+      table.insert(out, "left side")
+    end
+    table.insert(out, "** " .. typ)
+    local items, has_shared = {}, false
+    for _, it in ipairs(M.items_for(typ)) do
+      if shared[it.label] then
+        has_shared = true
+        users[it.label] = users[it.label] or {}
+        table.insert(users[it.label], typ)
+      else
+        table.insert(items, it)
+      end
+    end
+    branch(3, "Insert", items, has_shared and "<i>+ common items</i>" or nil)
+    if can_connect(typ) then
+      branch(3, "Connect", M.arrows_for(typ))
+    end
+    branch(3, "Wrap", M.wraps_for(typ))
+  end
+  -- shared items grouped by the set of types that get them
+  local groups, order = {}, {}
+  for _, it in ipairs(shared_list) do
+    local ts = users[it.label]
+    if ts then
+      local key = table.concat(ts, ", ")
+      if not groups[key] then
+        groups[key] = {}
+        table.insert(order, key)
+      end
+      table.insert(groups[key], it)
+    end
+  end
+  if #order > 0 then
+    table.insert(out, "** common items")
+    for _, key in ipairs(order) do
+      branch(3, "Insert in " .. key, groups[key])
+    end
+  end
+  table.insert(out, "@endmindmap")
+  return out
 end
 
 return M

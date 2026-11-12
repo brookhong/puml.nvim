@@ -61,9 +61,12 @@ local function set_lines(pbuf, lines)
   vim.bo[pbuf].modified = false
 end
 
+-- the preview's own keys, right-aligned after the status text
+local KEYS = "%=%#Comment# ? menu  q close  r render  m mode "
+
 local function set_winbar(s, text, hl)
   if valid_win(s.win) then
-    vim.wo[s.win].winbar = "%#" .. (hl or "WinBar") .. "#" .. text:gsub("%%", "%%%%")
+    vim.wo[s.win].winbar = "%#" .. (hl or "WinBar") .. "#" .. text:gsub("%%", "%%%%") .. KEYS
   end
 end
 
@@ -98,6 +101,11 @@ local function create_pbuf(buf)
   vim.keymap.set("n", "m", function()
     M.cycle_mode(buf)
   end, vim.tbl_extend("force", o, { desc = "Cycle preview mode" }))
+  for _, k in ipairs({ "?", "<CR>" }) do
+    vim.keymap.set("n", k, function()
+      require("puml.menu").open(buf)
+    end, vim.tbl_extend("force", o, { desc = "puml menu" }))
+  end
   return pbuf
 end
 
@@ -204,8 +212,18 @@ function M.render(buf, opts)
     local dir = p.image_dir or (vim.fn.stdpath("cache") .. "/puml")
     out = util.output_path(buf, d, fmt, dir)
   end
-  local label = string.format(" PlantUML · %s · %s", d.type, mode)
-  set_winbar(s, label .. " · rendering…", "WinBar")
+  -- PlantUML's text output for activity diagrams has no boxes/arrows: draw them ourselves
+  -- (PlantUML still runs below, for syntax errors / diagnostics).
+  local builtin
+  if mode == "text" and d.type == "activity" and p.builtin_text then
+    local ok, res = pcall(require("puml.activity_text").render, d.body, { ascii = fmt == "txt" })
+    builtin = ok and res or nil
+  end
+  local label = string.format(" PlantUML · %s · %s%s", d.type, mode, builtin and " (built-in)" or "")
+  if builtin then
+    set_lines(s.pbuf, builtin)
+  end
+  set_winbar(s, label .. (builtin and " · checking…" or " · rendering…"), "WinBar")
   s.job = render.render(d.input, fmt, out, function(res)
     if seq ~= s.seq or res.cancelled then
       return
@@ -222,7 +240,9 @@ function M.render(buf, opts)
     else
       set_winbar(s, string.format("%s · %s (%dms)", label, stamp, res.ms), "WinBar")
     end
-    if mode == "text" then
+    if builtin and not res.err then
+      set_lines(s.pbuf, builtin)
+    elseif mode == "text" then
       local lines = vim.split((res.data or ""):gsub("%s+$", ""), "\n", { plain = true })
       if res.err and (res.data == nil or res.data == "") then
         lines = vim.split(res.err.message or "error", "\n")
