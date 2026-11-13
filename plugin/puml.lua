@@ -73,6 +73,10 @@ cmd("PumlCatalog", function()
   require("puml.preview").open(buf)
 end, { desc = "Mindmap of diagram types and their available items" })
 
+cmd("PumlScript", function()
+  require("puml.script").command(0)
+end, { desc = "puml script: compile .pus to PlantUML (with preview), or convert a PlantUML diagram to .pus" })
+
 cmd("PumlInsert", function(o)
   require("puml.actions").insert(o.args)
 end, { nargs = "?", complete = item_complete, desc = "Insert a PlantUML element" })
@@ -111,7 +115,9 @@ vim.api.nvim_create_autocmd("FileType", {
   pattern = "*",
   callback = function(ev)
     local ft = vim.bo[ev.buf].filetype
-    if ft == "plantuml" then
+    if ft == "pumlscript" then
+      require("puml.script").attach(ev.buf)
+    elseif ft == "plantuml" then
       puml().attach(ev.buf)
     elseif require("puml.util").is_markdown(ev.buf) then
       puml().attach(ev.buf)

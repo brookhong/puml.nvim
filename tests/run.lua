@@ -655,6 +655,219 @@ end)
 vim.notify = orig_notify
 eq("export", vim.fn.filereadable(dir .. "/flow.svg"), 1)
 
+-- puml script ---------------------------------------------------------------------------------
+do
+  local script = require("puml.script")
+  local function C(src)
+    local out, errs = script.compile(vim.split(src, "\n"))
+    return out and table.concat(out, "\n") or script.format_errors(errs)
+  end
+  eq("script: sequence", C([[
+sequence: T
+actor A "Alice"   # a comment
+A -> B++: call
+if ok:
+    B --> A: yes
+elif later:
+    B --> A: wait
+else:
+    B --> A--: no
+loop each:
+    A ->> B: ping
+parallel:
+    branch:
+        A -> B: one
+    branch:
+        A -> B: two
+note over A, B: n
+section S
+delay later]]), table.concat({ "@startuml", "title T", 'actor "Alice" as A', "A -> B ++ : call", "alt ok", "  B --> A : yes",
+    "else later", "  B --> A : wait", "else", "  B --> A -- : no", "end", "loop each", "  A ->> B : ping", "end",
+    "par", "  A -> B : one", "else", "  A -> B : two", "end", "note over A, B: n", "== S ==", "...later...", "@enduml" }, "\n"))
+  eq("script: activity, start/stop added", C([[
+activity: T
+lane L
+a
+if x? [y]:
+    b
+elif z?:
+    c
+else [n]:
+    d
+do:
+    e
+while again?
+parallel:
+    branch:
+        f
+    branch:
+        g]]), table.concat({ "@startuml", "title T", "|L|", "start", ":a;", "if (x?) then (y)", "  :b;", "elseif (z?) then (yes)",
+    "  :c;", "else (n)", "  :d;", "endif", "repeat", "  :e;", "repeat while (again?) is (yes)", "fork", "  :f;", "fork again",
+    "  :g;", "end fork", "stop", "@enduml" }, "\n"))
+  eq("script: guess sequence without header", C("A -> B: x"):find("A -> B : x", 1, true) ~= nil, true)
+  eq("script: guess activity without header", C("do a thing"), "@startuml\nstart\n:do a thing;\nstop\n@enduml")
+  eq("script: box colour kept, # comment dropped", C('sequence:\nbox "P" #LightBlue:\n    participant X # c'), '@startuml\nbox "P" #LightBlue\n  participant X\nend box\n@enduml')
+  eq("script: multi-line note", C("sequence:\nA -> B: x\nnote over A:\n    one\n    two"), "@startuml\nA -> B : x\nnote over A\n  one\n  two\nend note\n@enduml")
+  -- errors, with line numbers
+  eq("script err: else without if", C("else:\n    x"), { "1: `else` without `if` right above it" })
+  eq("script err: indentation", C("if a:\n    b\n  c"), { "3: inconsistent indentation" })
+  eq("script err: unexpected indent", C("sequence:\nA -> B: x\n    B -> A: y"), { "3: unexpected indentation (the line above doesn't end with `:`)" })
+  eq("script err: empty block", C("if a:\nb"), { "1: `if a:` opens a block but nothing is indented under it (use `pass` for an empty one)" })
+  eq("script err: not a statement", C("sequence:\nA -> B: x\nfoo bar"), { "3: not a sequence statement: `foo bar` (a message is `A -> B: text`)" })
+  eq("script err: branch", C("parallel:\n    a"), { "2: only `branch:` blocks go inside `parallel:`" })
+  eq("script err: do without while", C("do:\n    a\nb"), { "1: `do:` needs `while CONDITION` after its block, at the same indentation" })
+  eq("script err: action with colon", C("activity:\nprepare:\n    a"), { "2: unknown block in an activity diagram: `prepare:` (an action doesn't end with `:`)" })
+  eq("script err: box content", C('sequence:\nbox "X":\n    A -> B: x'), { "3: a box holds participant declarations only" })
+  -- the CLI
+  local cli = vim.fn.getcwd() .. "/scripts/pus2puml.lua"
+  local res = vim.system({ vim.v.progpath, "-l", cli, "-" }, { stdin = "if a:\n" }):wait()
+  eq("script cli: errors on stderr, exit 1", { res.code, vim.trim(res.stderr) }, { 1, "stdin:1: `if a:` opens a block but nothing is indented under it (use `pass` for an empty one)" })
+  res = vim.system({ vim.v.progpath, "-l", cli, "-" }, { stdin = "A -> B: x\n" }):wait()
+  eq("script cli: PlantUML on stdout", { res.code, res.stdout }, { 0, "@startuml\nA -> B : x\n@enduml\n" })
+end
+
+-- PlantUML -> puml script -----------------------------------------------------------------------
+do
+  local script = require("puml.script")
+  local function D(src)
+    local pus, notes, err = script.decompile(vim.split(src, "\n"))
+    return pus and table.concat(pus, "\n") or err, notes
+  end
+  local function norm(ls)
+    local o = {}
+    for _, l in ipairs(ls) do
+      local t = vim.trim(l)
+      if t ~= "" and not t:match("^title ") then
+        table.insert(o, (t:gsub("%s+", "")))
+      end
+    end
+    return o
+  end
+  -- both full templates survive PlantUML -> script -> PlantUML (whitespace aside; the title moves to the header)
+  for _, typ in ipairs({ "sequence", "activity" }) do
+    local src = vim.split(require("puml.catalog").templates[typ], "\n")
+    local pus = script.decompile(src)
+    local back, errs = script.compile(pus)
+    eq("decompile round trip " .. typ, back and norm(back) or script.format_errors(errs), norm(src))
+  end
+  eq("decompile sequence", D("@startuml\ntitle T\nactor \"Alice\" as A\nA -> B ++ : hi\nalt ok\nelse\nB --> A -- : no\nend\npar p\nA -> B\nelse q\nB -> A\nend\n== S ==\n...later...\n|||\n@enduml"),
+    table.concat({ "sequence: T", 'actor A "Alice"', "A -> B++: hi", "if ok:", "    pass", "else:", "    B --> A--: no",
+      "parallel:", "    branch p:", "        A -> B", "    branch q:", "        B -> A", "section S", "delay later", "space" }, "\n"))
+  eq("decompile activity", D("@startuml\n|L|\nstart\n:a;\nif (x?) then (yes)\n:b;\nelse (n)\nendif\nrepeat\n:c;\nrepeat while (more?) is (yes)\nfork\n:d;\nfork again\n:e;\nend fork\nstop\n@enduml"),
+    table.concat({ "activity", "lane L", "start", "a", "if x?:", "    b", "else [n]:", "    pass", "do:", "    c", "while more?",
+      "parallel:", "    branch:", "        d", "    branch:", "        e", "stop" }, "\n"))
+  eq("decompile: multi-line action, keyword-like actions kept (an arrow is a plain action in activity)", D("@startuml\nstart\n:one\ntwo;\n:start;\n:A -> B;\nstop\n@enduml"),
+    table.concat({ "activity", "start", "one\\ntwo", "plantuml: :start;", "A -> B", "stop" }, "\n"))
+  local _, notes = D("@startuml\nstart\n(A)\nstop\n@enduml")
+  eq("decompile: unknown lines kept as plantuml: and reported", vim.tbl_map(function(n) return n.line end, notes), { 3 })
+  eq("decompile: comments kept", D("@startuml\n' hi\nA -> B\n@enduml"), "sequence\n# hi\nA -> B")
+  eq("decompile: not sequence/activity", D("@startuml\nclass A\n@enduml"), "only sequence and activity diagrams can be converted (this is class)")
+  eq("decompile: legacy activity", D('@startuml\n(*) --> "a"\n@enduml'), "the old `(*) -->` activity syntax can't be converted; only the current one")
+  -- comments survive compiling too
+  local out = script.compile({ "# top", "sequence", "# before", "A -> B: x", "# end" })
+  eq("compile keeps comments", out, { "@startuml", "' top", "' before", "A -> B : x", "' end", "@enduml" })
+  -- the CLI picks the direction from the input
+  local cli = vim.fn.getcwd() .. "/scripts/pus2puml.lua"
+  local res = vim.system({ vim.v.progpath, "-l", cli, "-" }, { stdin = "@startuml\nA -> B: x\n@enduml\n" }):wait()
+  eq("cli: PlantUML -> script", { res.code, res.stdout }, { 0, "sequence\nA -> B: x\n" })
+end
+
+-- puml script: syntax + indent ----------------------------------------------------------------
+do
+  vim.cmd("syntax on")
+  vim.cmd("filetype plugin indent on")
+  local sb = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_set_current_buf(sb)
+  vim.api.nvim_buf_set_lines(sb, 0, -1, false, {
+    "sequence: T # c", "actor A", "A -> B++: hi", "if ok [yes]:", "    B --> A: y", "note over A: n",
+    "plantuml: A -> B", "prepare:", "pack item", "while again?",
+  })
+  vim.bo[sb].filetype = "pumlscript"
+  local function at(l, c)
+    return vim.fn.synIDattr(vim.fn.synID(l, c, 1), "name")
+  end
+  eq("pus syntax", {
+    at(1, 1), at(1, 11), at(1, 14), at(2, 1), at(2, 7), at(3, 1), at(3, 3), at(3, 7), at(3, 12),
+    at(4, 1), at(4, 4), at(4, 7), at(4, 12), at(6, 1), at(6, 14), at(7, 1), at(8, 1), at(9, 1), at(10, 1),
+  }, {
+    "pusHeader", "pusTitle", "pusComment", "pusDecl", "pusDeclName", "pusName", "pusArrow", "pusActivation", "pusText",
+    "pusBlock", "pusCond", "pusBranchLabel", "pusColon", "pusNote", "pusText", "pusPassKeyword", "pusUnknownBlock", "", "pusBlock",
+  })
+  eq("pus ftplugin", { vim.bo[sb].shiftwidth, vim.bo[sb].expandtab, vim.bo[sb].commentstring }, { 4, true, "# %s" })
+  -- indent: deeper after `:`, else back to its if, branch/case under their block
+  local script = require("puml.script")
+  vim.api.nvim_buf_set_lines(sb, 0, -1, false, {
+    "if a:", "    b", "    else:", "parallel:", "    branch:", "        x", "        branch:", "switch s:", "    case 1:", "        y", "        case 2:",
+  })
+  eq("pus indent", vim.tbl_map(function(l) return script.indent(l) end, { 2, 3, 5, 6, 7, 9, 10, 11 }), { 4, 0, 4, 8, 4, 4, 8, 4 })
+  vim.api.nvim_buf_delete(sb, { force = true })
+end
+
+-- puml script: review fixes ------------------------------------------------------------------------
+do
+  local script = require("puml.script")
+  local function C(t)
+    local o, e = script.compile(t)
+    return o and table.concat(o, "\n") or script.format_errors(e)
+  end
+  -- 1. `=` keeps the meaning: only implied indentation changes
+  local ib = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_set_current_buf(ib)
+  vim.bo[ib].filetype = "pumlscript"
+  local src = { "if a:", "    if b:", "        x", "else:", "    y", "after", "parallel:", "    branch:", "        p", "    branch:", "        q" }
+  vim.api.nvim_buf_set_lines(ib, 0, -1, false, src)
+  vim.cmd("silent normal! gg=G")
+  eq("pus: gg=G changes nothing in a well-indented script", vim.api.nvim_buf_get_lines(ib, 0, -1, false), src)
+  -- 4. typing `:` doesn't pull a dedented line back into a block
+  eq("pus: no <:> in indentkeys", vim.bo[ib].indentkeys:find("<:>", 1, true), nil)
+  vim.api.nvim_buf_delete(ib, { force = true })
+  -- 3. `plantuml:` lines are verbatim; ` # ` in converted text stays PlantUML
+  eq("script: plantuml: keeps ' # '", C({ "sequence", "plantuml: A -> B: fix # 42" }), "@startuml\nA -> B: fix # 42\n@enduml")
+  local pus = script.decompile({ "@startuml", "A -> B: fix # 42", "@enduml" })
+  eq("decompile: ' # ' kept as PlantUML", pus, { "sequence", "plantuml: A -> B: fix # 42" })
+  -- 5. the added start goes after leading comments and lanes
+  eq("script: start after comment + lane", C({ "activity", "# lanes", "lane L", "a" }), "@startuml\n' lanes\n|L|\nstart\n:a;\nstop\n@enduml")
+  -- 7. note text is taken as written
+  eq("script: note text verbatim", C({ "sequence", "A -> B: x", "note over A:", "    list:", "        - one # two", "B -> A: y" }),
+    "@startuml\nA -> B : x\nnote over A\n  list:\n      - one # two\nend note\nB -> A : y\n@enduml")
+  -- 8. keywords need a word boundary
+  eq("script: no prefix keywords", C({ "sequence", "A -> B: x", "returning soon", "sectioned" }), {
+    "3: not a sequence statement: `returning soon` (a message is `A -> B: text`)",
+    "4: not a sequence statement: `sectioned` (a message is `A -> B: text`)" })
+  -- 9. activity actions that only look like sequence keywords stay plain
+  pus = script.decompile({ "@startuml", "start", ":create order;", ":return item;", ":note: x;", "stop", "@enduml" })
+  eq("decompile: plain activity actions", pus, { "activity", "start", "create order", "return item", "plantuml: :note: x;", "stop" })
+  -- 10. only the first diagram, and it says so
+  local _, notes = script.decompile({ "@startuml", "A -> B", "@enduml", "@startuml", "C -> D", "@enduml" })
+  eq("decompile: several diagrams", notes[1] and notes[1].msg, "only the first of 2 diagrams was converted")
+  -- 11. any `#` line is a comment
+  eq("script: #TODO is a comment", C({ "activity", "#TODO later", "a" }), "@startuml\n' TODO later\nstart\n:a;\nstop\n@enduml")
+  -- 6. the CLI works from any directory
+  local res = vim.system({ vim.v.progpath, "-l", "pus2puml.lua", "-" }, { stdin = "A -> B: x\n", cwd = vim.fn.getcwd() .. "/scripts" }):wait()
+  eq("cli: run from scripts/", { res.code, res.stdout }, { 0, "@startuml\nA -> B : x\n@enduml\n" })
+  -- 2. a hand-written FILE.puml is only replaced after asking
+  local dir = vim.fn.tempname()
+  vim.fn.mkdir(dir, "p")
+  vim.fn.writefile({ "@startuml", "Alice -> Bob: by hand", "@enduml" }, dir .. "/f.puml")
+  vim.fn.writefile({ "sequence", "A -> B: script" }, dir .. "/f.pus")
+  local orig_confirm, answers = vim.fn.confirm, {}
+  vim.fn.confirm = function()
+    table.insert(answers, 1)
+    return #answers == 1 and 2 or 1 -- no, then yes
+  end
+  vim.cmd("edit " .. dir .. "/f.pus")
+  script.run(0, { refresh = true })
+  eq("script: asks before replacing a hand-written .puml (no)", vim.fn.readfile(dir .. "/f.puml")[2], "Alice -> Bob: by hand")
+  script.run(0, { refresh = true })
+  eq("script: replaced after yes, with the marker", vim.fn.readfile(dir .. "/f.puml")[2], "' generated from f.pus by :PumlScript; edit the script instead")
+  vim.b.puml_script_from, vim.b.puml_script_target = nil, nil
+  script.run(0, { refresh = true })
+  eq("script: a generated .puml is replaced without asking", #answers, 2)
+  eq("decompile drops the marker", script.decompile(vim.fn.readfile(dir .. "/f.puml")), { "sequence", "A -> B: script" })
+  vim.fn.confirm = orig_confirm
+  vim.cmd("silent! %bwipeout!")
+end
+
 -- review fixes ----------------------------------------------------------------------------------
 do
   -- the preview's keys stay in its winbar next to the status
