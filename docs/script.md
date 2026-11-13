@@ -58,8 +58,9 @@ taken exactly as written, comments and indentation included.
 | Script | Meaning |
 |---|---|
 | `if COND [LABEL]:` / `elif COND [LABEL]:` / `else [LABEL]:` | condition (`alt`/`else` in sequence, `if`/`elseif`/`else` in activity; `[LABEL]` = branch label, activity only, default yes/no) |
-| `while COND [LABEL]:` | loop that tests first (`loop` in sequence) |
-| `do:` + `while COND [LABEL]` (same indent, no colon) | loop that tests after (`repeat … repeat while`) |
+| `while COND [LABEL] [EXIT]:` | loop that tests first (`loop` in sequence; activity: `while (COND) is (LABEL)` … `endwhile (EXIT)`, default yes/no) |
+| `do:` + `while COND [LABEL] [EXIT]` (same indent, no colon) | loop that tests after (`repeat … repeat while (COND) is (LABEL) not (EXIT)`) |
+| `while COND [LABEL] -[#red,dashed]-> TEXT` · `while COND -> TEXT` (activity, after `do:`) | the same, with a style and/or text for the arrow back to the loop start, as in PlantUML |
 | `parallel:` with `branch:` children | parallel branches (`par` / `fork`) |
 | `group NAME:` | a labelled frame |
 | `note: TEXT` · `note left: TEXT` · `note right: TEXT` | note on the last statement |
@@ -68,6 +69,9 @@ taken exactly as written, comments and indentation included.
 | `pass` | an intentionally empty block (e.g. an empty `else:`) |
 | `legend [POSITION]:` with text lines indented under it | a multi-line legend |
 | `# comment` on its own line | kept as a PlantUML comment `' comment` |
+
+Loop labels can be left out (`while x?` = `is (yes)`), and `[]` means "no label"
+(`while x? [] [no]` → `repeat while (x?) not (no)`).
 
 ## Sequence only
 

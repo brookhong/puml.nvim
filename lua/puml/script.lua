@@ -136,6 +136,35 @@ local function message(t)
   return { from = a, arrow = arrow, to = b, act = act, label = label }
 end
 
+--- `COND [LABEL] -[#red]-> TEXT` / `COND [LABEL] -> TEXT` -> `COND [LABEL]` and the
+--- arrow back to the loop start (PlantUML syntax), or nil
+local function split_arrow(s)
+  local c, a = s:match("^(.-)%s+(%-%[[^%]]*%]%->.*)$")
+  if not c then
+    c, a = s:match("^(.-)%s+(%->%s.*)$")
+  end
+  if not c then
+    c, a = s:match("^(.-)%s+(%->)$")
+  end
+  if c then
+    return trim(c), trim(a)
+  end
+  return s, nil
+end
+
+--- `COND [LABEL] [EXIT]` -> cond, label, exit (labels nil when not given; `[]` = none)
+local function cond_labels(s)
+  local c, l, x = s:match("^(.-)%s*%[([^%]]*)%]%s*%[([^%]]*)%]$")
+  if c then
+    return trim(c), trim(l), trim(x)
+  end
+  c, l = s:match("^(.-)%s*%[([^%]]*)%]$")
+  if c then
+    return trim(c), trim(l), nil
+  end
+  return trim(s), nil, nil
+end
+
 --- `COND [LABEL]` -> cond, label
 local function cond_label(s)
   local c, l = s:match("^(.-)%s*%[(.-)%]$")
@@ -211,13 +240,17 @@ local function emit_seq(nodes, out, depth, errs)
       elseif kw(h, "elif") or kw(h, "else") then
         table.insert(errs, { line = n.line, msg = "`" .. h:match("^%a+") .. "` without `if` right above it" })
       elseif kw(h, "while") or kw(h, "loop") or kw(h, "for") then
-        put("loop " .. (cond_label(rest_of(h, h:match("^%a+")))))
+        put("loop " .. (cond_labels(rest_of(h, h:match("^%a+")))))
         body()
         put("end")
       elseif h == "do" then
         local nxt = nodes[i + 1]
         if nxt and not nxt.block and kw(nxt.text, "while") then
-          put("loop " .. (cond_label(rest_of(nxt.text, "while"))))
+          local cl, arrow = split_arrow(rest_of(nxt.text, "while"))
+          if arrow then
+            table.insert(errs, { line = nxt.line, msg = "an arrow style on `while` only works in activity diagrams" })
+          end
+          put("loop " .. (cond_labels(cl)))
           body()
           put_comments(nxt, put)
           put("end")
@@ -377,18 +410,24 @@ local function emit_act(nodes, out, depth, errs)
       elseif kw(h, "elif") or kw(h, "else") then
         table.insert(errs, { line = n.line, msg = "`" .. h:match("^%a+") .. "` without `if` right above it" })
       elseif kw(h, "while") then
-        local c, l = cond_label(rest_of(h, "while"))
-        put(("while (%s) is (%s)"):format(c, l or "yes"))
+        local cl, arrow = split_arrow(rest_of(h, "while"))
+        if arrow then
+          table.insert(errs, { line = n.line, msg = "an arrow style works on the `while` closing a `do:` block, not on `while …:`" })
+        end
+        local c, l, x = cond_labels(cl)
+        put(("while (%s)%s"):format(c, l == "" and "" or (" is (" .. (l or "yes") .. ")")))
         body()
-        put("endwhile (no)")
+        put(x == "" and "endwhile" or ("endwhile (" .. (x or "no") .. ")"))
       elseif h == "do" then
         local nxt = nodes[i + 1]
         if nxt and not nxt.block and kw(nxt.text, "while") then
-          local c, l = cond_label(rest_of(nxt.text, "while"))
+          local cl, arrow = split_arrow(rest_of(nxt.text, "while"))
+          local c, l, x = cond_labels(cl)
           put("repeat")
           body()
           put_comments(nxt, put)
-          put(("repeat while (%s) is (%s)"):format(c, l or "yes"))
+          put(("repeat while (%s)%s%s%s"):format(c, l == "" and "" or (" is (" .. (l or "yes") .. ")"),
+            (x and x ~= "") and (" not (" .. x .. ")") or "", arrow and (" " .. arrow) or ""))
           i = i + 1
         else
           table.insert(errs, { line = n.line, msg = "`do:` needs `while CONDITION` after its block, at the same indentation" })
@@ -599,6 +638,30 @@ local function looks_like_keyword(t)
     or t:match("^note%s*%a*%s*:")
     or (({ title = 1, header = 1, footer = 1, caption = 1, skinparam = 1, ["while"] = 1 })[w] and t:match("^%a+%s"))
     or t:match("%s#%s") or t:match("%s#$") -- would be cut as a comment
+end
+
+--- Script labels of a loop: `[LABEL] [EXIT]`, leaving out what the compiler adds by
+--- itself (`is (yes)`, and `endwhile (no)` when `exit_default` is "no"); `[]` = no label.
+--- is / exit: the label, or false when PlantUML has none.
+local function loop_labels(is, exit, exit_default)
+  local l = is
+  if is == false then
+    l = "" -- no `is (…)`: an explicit empty label
+  end
+  local x
+  if exit == false then
+    -- no exit label: only spelled out when the compiler would add one (`endwhile (no)`)
+    x = exit_default and "" or nil
+  elseif exit ~= exit_default then
+    x = exit
+  end
+  if x ~= nil then
+    return (" [%s] [%s]"):format(l == nil and "yes" or l, x)
+  end
+  if l ~= "yes" then
+    return (" [%s]"):format(l)
+  end
+  return ""
 end
 
 --- `X (label)` helpers
@@ -856,26 +919,33 @@ function M.decompile(lines, typ)
       elseif ll:match("^endif") or ll:match("^end%s+if") then
         close("if")
       elseif ll:match("^while%s*%(") then
-        local c, l = t:match("^%a+%s*(%b())%s*is%s*(.*)$")
-        if not c then
-          c = t:match("^%a+%s*(%b())")
-        end
-        open("while", "while " .. cl(paren(c), l, "yes") .. ":")
+        local c = t:match("^%a+%s*(%b())")
+        local is = t:match("%)%s*is%s*(%b())")
+        open("while", "while " .. paren(c) .. ":")
+        -- the exit label is only known at `endwhile`: the line is rewritten then
+        local e = stack[#stack]
+        e.line, e.cond, e.is = #out, paren(c), is and paren(is) or false
       elseif ll:match("^endwhile") or ll:match("^end%s+while") then
-        local l = paren(t:match("^%a+%s*(.*)$") or "")
-        if l and l ~= "" and l ~= "no" then
-          table.insert(notes, { line = b.line, msg = "the endwhile label `" .. l .. "` becomes `no`" })
+        local e = top("while")
+        if e then
+          local exit = t:match("^%a+%s*%a*%s*(%b())")
+          exit = exit and paren(exit) or false
+          local labels = loop_labels(e.is, exit, "no")
+          out[e.line] = string.rep("    ", e.base) .. "while " .. e.cond .. labels .. ":"
         end
         close("while")
       elseif ll == "repeat" then
         open("repeat", "do:")
       elseif ll:match("^repeat%s*while") then
-        local c, l = t:match("(%b())%s*is%s*(.*)$")
-        c = c or t:match("%b()")
+        local rw, arrow = split_arrow(t)
+        local c = rw:match("^%a+%s*%a+%s*(%b())") or rw:match("%b()")
+        local is = rw:match("%)%s*is%s*(%b())")
+        local nt = rw:match("%)%s*not%s*(%b())")
         local e = top("repeat")
         if e then
           close("repeat")
-          put("while " .. cl(paren(c) or "", l, "yes"))
+          put("while " .. (paren(c) or "") .. loop_labels(is and paren(is) or false, nt and paren(nt) or false, nil)
+            .. (arrow and (" " .. arrow) or ""))
         else
           pass_through(b, "`repeat while` without `repeat`")
         end

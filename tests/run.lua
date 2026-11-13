@@ -868,6 +868,52 @@ do
   vim.cmd("silent! %bwipeout!")
 end
 
+-- puml script: styled loop-back arrow ------------------------------------------------------------
+do
+  local script = require("puml.script")
+  local out = script.compile({ "activity", "do:", "    poll", "while next run? [yes] -[#red,dashed]-> again" })
+  eq("script: while with arrow style", out and out[5], "repeat while (next run?) is (yes) -[#red,dashed]-> again")
+  eq("decompile: arrow style kept", script.decompile(out), { "activity", "start", "do:", "    poll", "while next run? -[#red,dashed]-> again", "stop" })
+  local _, errs = script.compile({ "sequence", "do:", "    A -> B: x", "while more? -[#red]->" })
+  eq("script: arrow style only in activity", errs[1] and errs[1].msg, "an arrow style on `while` only works in activity diagrams")
+  -- a plain arrow text is the arrow's, not the condition's
+  out = script.compile({ "activity", "do:", "    poll", "while next run? -> again" })
+  eq("script: while with plain arrow text", out and out[5], "repeat while (next run?) is (yes) -> again")
+  _, errs = script.compile({ "activity", "while x? -[#red]->:", "    a" })
+  eq("script: no arrow style on while …:", errs[1] and errs[1].msg, "an arrow style works on the `while` closing a `do:` block, not on `while …:`")
+  -- exit labels, both loops; `[]` = no label
+  local function rw(l)
+    local p = script.decompile({ "@startuml", "start", "repeat", ":a;", l, "stop", "@enduml" })
+    local back = script.compile(p)
+    return { p[5], back and back[5] }
+  end
+  eq("loop labels: is + not", rw("repeat while (x?) is (yes) not (no)"), { "while x? [yes] [no]", "repeat while (x?) is (yes) not (no)" })
+  eq("loop labels: only not", rw("repeat while (x?) not (no)"), { "while x? [] [no]", "repeat while (x?) not (no)" })
+  eq("loop labels: none", rw("repeat while (x?)"), { "while x? []", "repeat while (x?)" })
+  eq("loop labels: default", rw("repeat while (x?) is (yes)"), { "while x?", "repeat while (x?) is (yes)" })
+  eq("loop labels: all + arrow", rw("repeat while (x?) is (more) not (done) -[#red]-> again"),
+    { "while x? [more] [done] -[#red]-> again", "repeat while (x?) is (more) not (done) -[#red]-> again" })
+  local function wl(open, close)
+    local p = script.decompile({ "@startuml", "start", open, ":a;", close, "stop", "@enduml" })
+    local back = script.compile(p)
+    return { p[3], back and back[3], back and back[5] }
+  end
+  eq("while labels: both", wl("while (x?) is (y)", "endwhile (n)"), { "while x? [y] [n]:", "while (x?) is (y)", "endwhile (n)" })
+  eq("while labels: none", wl("while (x?)", "endwhile"), { "while x? [] []:", "while (x?)", "endwhile" })
+  eq("while labels: default", wl("while (x?) is (yes)", "endwhile (no)"), { "while x?:", "while (x?) is (yes)", "endwhile (no)" })
+  -- highlighting of the styled line
+  vim.cmd("syntax on")
+  local sb = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_set_current_buf(sb)
+  vim.api.nvim_buf_set_lines(sb, 0, -1, false, { "while next run? [yes] -[#red,dashed]-> again" })
+  vim.bo[sb].filetype = "pumlscript"
+  local function at(c)
+    return vim.fn.synIDattr(vim.fn.synID(1, c, 1), "name")
+  end
+  eq("pus syntax: styled while", { at(17), at(23), at(41) }, { "pusBranchLabel2", "pusLoopArrow", "pusLoopText" })
+  vim.api.nvim_buf_delete(sb, { force = true })
+end
+
 -- review fixes ----------------------------------------------------------------------------------
 do
   -- the preview's keys stay in its winbar next to the status

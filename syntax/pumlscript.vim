@@ -24,12 +24,15 @@ syntax match pusBlock /^\s*\zs\%(if\|elif\|while\|loop\|for\|opt\|break\|critica
 syntax match pusBlock /^\s*\zs\%(else\|do\|parallel\|split\|branch\)\>\ze.*:\s*$/ nextgroup=pusCond skipwhite
 syntax match pusBlock /^\s*\zsnote\>\ze[^:]*:\s*$/ nextgroup=pusNoteTarget skipwhite
 syntax match pusCond /[^:]*\ze:\s*$/ contained contains=pusBranchLabel,pusString,pusColor nextgroup=pusColon
-syntax match pusBranchLabel /\[[^\]]*\]\ze\s*:\s*$/ contained
+syntax match pusBranchLabel /\[[^\]]*\]/ contained
 syntax match pusColon /:\s*$/ contained
 " `while COND` closing a `do:` block (no colon)
 syntax match pusBlock /^\s*\zswhile\>\ze\%(.*:\s*$\)\@!/ nextgroup=pusCondLine skipwhite
-syntax match pusCondLine /.*$/ contained contains=pusBranchLabel2
-syntax match pusBranchLabel2 /\[[^\]]*\]\s*$/ contained
+syntax match pusCondLine /.*$/ contained contains=pusBranchLabel2,pusLoopArrow
+syntax match pusBranchLabel2 /\[[^\]]*\]/ contained
+" `-[#red,dashed]-> TEXT` / `-> TEXT`: the arrow back to the loop start
+syntax match pusLoopArrow /-\[[^\]]*\]->\|\s\zs->\ze\%(\s\|$\)/ contained contains=pusColor nextgroup=pusLoopText
+syntax match pusLoopText /.*$/ contained
 
 " ---- header ------------------------------------------------------------------------
 syntax match pusHeader /^\%(sequence\|activity\)\>\ze\s*\%(:.*\)\?$/ nextgroup=pusTitle
@@ -76,6 +79,8 @@ hi def link pusCond Normal
 hi def link pusCondLine Normal
 hi def link pusBranchLabel Label
 hi def link pusBranchLabel2 Label
+hi def link pusLoopArrow Operator
+hi def link pusLoopText Label
 hi def link pusColon Delimiter
 hi def link pusHeader PreProc
 hi def link pusTitle Title
