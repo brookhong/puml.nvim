@@ -16,6 +16,10 @@ Files use the `.pus` extension. It works in both directions:
 
 - **Script → PlantUML:** `:PumlScript` in a `.pus` buffer writes `FILE.puml` next to it and
   shows it with its preview; saving the script recompiles it. Errors become diagnostics.
+  The split and preview opened this way close again when the script is closed (`:q`, `:bd`,
+  or another file in its window), and reopen on the next compile. Windows you opened
+  yourself stay, a `FILE.puml` with unsaved edits keeps its window, and the last window of
+  a tab page is never closed.
   The file starts with a `' generated from FILE.pus` comment; a `FILE.puml` without it
   (written by hand) is only replaced after asking.
 - **PlantUML → script:** `:PumlScript` in a PlantUML buffer converts the diagram under the

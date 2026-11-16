@@ -36,7 +36,7 @@ DB --> API: rows               │          ╠═══════════
 - **Text objects** (opt-in) for the enclosing block (`loop…end`, `if…endif`, `{…}`, `note…end note`, …).
 - **Errors as diagnostics**, mapped back to the right buffer line.
 - **Templates** for new diagrams, plus **export** to png/svg/txt/pdf/…. Each template uses every element of its diagram type, with section comments, so you start from a diagram that renders and delete what you don't need.
-- **puml script** (`.pus`): an indentation-based shorthand for sequence and activity diagrams that compiles to PlantUML. There are no `end`/`endif` to balance, the same `if/elif/else`, `while`, `parallel` work in both diagram types, and errors come with line numbers. `:PumlScript` compiles it and shows the result with its preview (saving recompiles it). In a PlantUML buffer, `:PumlScript` converts the diagram the other way, to a `.pus` script. `nvim -l scripts/pus2puml.lua FILE` does either from the shell, depending on the input. `.pus` files get syntax highlighting (including the PlantUML inside `plantuml:` lines) and Python-style auto-indent. See [docs/script.md](docs/script.md).
+- **puml script** (`.pus`): an indentation-based shorthand for sequence and activity diagrams that compiles to PlantUML. There are no `end`/`endif` to balance, the same `if/elif/else`, `while`, `parallel` work in both diagram types, and errors come with line numbers. `:PumlScript` compiles it and shows the result with its preview (saving recompiles it; closing the script closes them again). In a PlantUML buffer, `:PumlScript` converts the diagram the other way, to a `.pus` script. `nvim -l scripts/pus2puml.lua FILE` does either from the shell, depending on the input. `.pus` files get syntax highlighting (including the PlantUML inside `plantuml:` lines) and Python-style auto-indent. See [docs/script.md](docs/script.md).
 - **Markdown**: works inside ```` ```plantuml ```` / ```` ```puml ```` fences.
 - **Completion**: an nvim-cmp source (`puml`) for names and snippets, and an omnifunc for names.
 - Local `plantuml` command **or** a PlantUML server (picoweb / plantuml-server) via curl.
@@ -76,7 +76,7 @@ lazy.nvim:
 | `:[range]PumlWrap [block]` | Wrap lines in a block (`loop`, `alt-else`, `if-else`, `package`, …) |
 | `:PumlNew [type]` | Insert a diagram template |
 | `:PumlExport [fmt]` | Export the diagram under the cursor next to the file |
-| `:PumlScript` | In a `.pus` buffer: compile it to `FILE.puml` and preview it. In a PlantUML buffer: convert the diagram to `FILE.pus` |
+| `:PumlScript` | In a `.pus` buffer: compile it to `FILE.puml` and preview it (both close with the script). In a PlantUML buffer: convert the diagram to `FILE.pus` |
 
 **There is one mapping: `<leader>u`** (normal and visual mode). It opens a menu of the actions that make sense at the cursor:
 

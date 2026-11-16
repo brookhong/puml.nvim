@@ -1160,10 +1160,14 @@ function M.run(buf, opts)
   end
   -- show it in a split next to the script, with the preview (not when only refreshing)
   local show = not opts.refresh
+  -- what this script opened, closed again with the script (see close_companions)
+  local c = M.companions[buf] or {}
+  c.tbuf, c.scratch = tbuf, target == nil
   if vim.fn.bufwinid(tbuf) == -1 and show then
     local win = vim.api.nvim_get_current_win()
     vim.cmd("belowright split")
     vim.api.nvim_win_set_buf(0, tbuf)
+    c.win = vim.api.nvim_get_current_win()
     vim.api.nvim_set_current_win(win)
   end
   local preview = require("puml.preview")
@@ -1173,10 +1177,95 @@ function M.run(buf, opts)
       preview.render(tbuf, { force = true })
     elseif show then
       preview.open(tbuf)
+      c.preview = preview.is_open(tbuf) or nil
     end
   end
+  M.companions[buf] = c
   return out, errs
 end
+
+---@type table<integer, {tbuf: integer, win: integer?, preview: boolean?, scratch: boolean}>
+--- per script buffer: the PlantUML buffer, and the split/preview `run` opened for it
+M.companions = {}
+
+--- Close the split and preview that `run` opened for script `buf`. Windows the user
+--- opened (or reused for another buffer) stay. The last window of a tab page is never
+--- closed (that would close the tab).
+--- While the PlantUML buffer has unsaved edits nothing is closed, and the record is kept
+--- so that closing the script again later (after saving) still closes them; `forget`
+--- drops it either way (the script buffer is gone, nothing will ask again).
+function M.close_companions(buf, forget)
+  local c = M.companions[buf]
+  if not c then
+    return
+  end
+  local tbuf = c.tbuf
+  if not vim.api.nvim_buf_is_valid(tbuf) then
+    M.companions[buf] = nil
+    return
+  end
+  if vim.bo[tbuf].modified and not c.scratch then
+    if forget then
+      M.companions[buf] = nil
+    end
+    return
+  end
+  M.companions[buf] = nil
+  local function closable(win)
+    if not (win and vim.api.nvim_win_is_valid(win)) then
+      return false
+    end
+    for _, w in ipairs(vim.api.nvim_tabpage_list_wins(vim.api.nvim_win_get_tabpage(win))) do
+      if w ~= win and vim.api.nvim_win_get_config(w).relative == "" then
+        return true
+      end
+    end
+    return false
+  end
+  local preview = require("puml.preview")
+  local ps = preview.state[tbuf]
+  if c.preview and ps and preview.is_open(tbuf) and closable(ps.win) then
+    preview.close(tbuf)
+  end
+  if c.win and closable(c.win) and vim.api.nvim_win_get_buf(c.win) == tbuf then
+    pcall(vim.api.nvim_win_close, c.win, false)
+  end
+  -- a scratch PlantUML buffer holds nothing to keep: it is rebuilt by the next compile
+  if c.scratch and #vim.fn.win_findbuf(tbuf) == 0 then
+    pcall(vim.api.nvim_buf_delete, tbuf, { force = true })
+  end
+end
+
+--- `:q` in script `buf`'s window would quit Neovim once its companions are closed, but
+--- refuse to (E37/E162) because some other buffer has unsaved changes. QuitPre runs before
+--- that check, so closing the companions then would leave the script alone on screen.
+local function quit_would_fail(buf)
+  if #vim.api.nvim_list_tabpages() > 1 then
+    return false -- :q closes the tab (or a window), never quits
+  end
+  local c = M.companions[buf]
+  local ours = {}
+  if c then
+    ours[c.win or -1] = true
+    local ps = require("puml.preview").state[c.tbuf]
+    if c.preview and ps and ps.win then
+      ours[ps.win] = true
+    end
+  end
+  local cur = vim.api.nvim_get_current_win()
+  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if w ~= cur and not ours[w] and vim.api.nvim_win_get_config(w).relative == "" then
+      return false -- another window stays: :q only closes this one
+    end
+  end
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if b ~= buf and vim.api.nvim_buf_is_loaded(b) and vim.bo[b].modified and vim.bo[b].buftype ~= "nofile" then
+      return true
+    end
+  end
+  return false
+end
+M._quit_would_fail = quit_would_fail -- tests
 
 --- `:PumlScript` in a PlantUML buffer: convert the diagram under the cursor to FILE.pus
 --- next to FILE.puml (or a scratch buffer) and open it in a split.
@@ -1231,7 +1320,7 @@ function M.command(buf)
 end
 
 --- For script buffers: recompile on save (opening the PlantUML + preview the first time,
---- refreshing it after that).
+--- refreshing it after that), and close what that opened once the script is closed.
 function M.attach(buf)
   local group = vim.api.nvim_create_augroup("puml_script_" .. buf, { clear = true })
   vim.api.nvim_create_autocmd("BufWritePost", {
@@ -1240,6 +1329,39 @@ function M.attach(buf)
     callback = function()
       local t = vim.b[buf].puml_script_target
       M.run(buf, { refresh = t ~= nil and vim.api.nvim_buf_is_valid(t) and vim.fn.bufwinid(t) ~= -1 })
+    end,
+  })
+  -- the script left its last window (:q, :bd, :e other): closing windows inside the
+  -- autocmd isn't allowed, so do it right after, if the script is still not shown
+  vim.api.nvim_create_autocmd("BufWinLeave", {
+    group = group,
+    buffer = buf,
+    callback = function()
+      vim.schedule(function()
+        if not vim.api.nvim_buf_is_valid(buf) or #vim.fn.win_findbuf(buf) == 0 then
+          M.close_companions(buf)
+        end
+      end)
+    end,
+  })
+  -- `:q` in the script's only window: close the splits first, so that when they were
+  -- the only other windows, the same `:q` quits Neovim (unless that quit would fail)
+  vim.api.nvim_create_autocmd("QuitPre", {
+    group = group,
+    buffer = buf,
+    callback = function()
+      if not vim.bo[buf].modified and #vim.fn.win_findbuf(buf) == 1 and not quit_would_fail(buf) then
+        M.close_companions(buf)
+      end
+    end,
+  })
+  vim.api.nvim_create_autocmd("BufWipeout", {
+    group = group,
+    buffer = buf,
+    callback = function()
+      vim.schedule(function()
+        M.close_companions(buf, true)
+      end)
     end,
   })
 end

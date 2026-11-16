@@ -4,6 +4,10 @@ vim.cmd("runtime plugin/puml.lua")
 vim.cmd("runtime ftdetect/plantuml.lua")
 vim.cmd("filetype plugin on")
 vim.o.expandtab, vim.o.shiftwidth = true, 2
+-- No tabline: Neovim 0.12 (headless, no UI) doesn't grow its tabline click table when
+-- 'columns' is raised (the hint tests set 120), so drawing the tabline once there are
+-- tab pages writes past the end of it and corrupts the heap, randomly crashing later.
+vim.o.showtabline = 0
 
 local fails, passes = 0, 0
 local function eq(name, got, want)
@@ -991,6 +995,115 @@ do
   picker.read_key = orig_read
   vim.o.columns = cols
   cfg.picker.ui = "select"
+end
+
+-- puml script: splits opened by a compile close with the script ---------------------------------
+do
+  local script = require("puml.script")
+  local preview = require("puml.preview")
+  local dir = vim.fn.tempname()
+  vim.fn.mkdir(dir, "p")
+  vim.fn.writefile({ "sequence", "A -> B: x" }, dir .. "/c.pus")
+  local function wins()
+    return #vim.api.nvim_tabpage_list_wins(0)
+  end
+  local function settle()
+    vim.wait(50)
+  end
+
+  -- 1. script leaves its window: the .puml split and the preview go
+  vim.cmd("tabnew " .. vim.fn.fnameescape(dir .. "/c.pus"))
+  local sb = vim.api.nvim_get_current_buf()
+  script.run(sb)
+  local tb = vim.b[sb].puml_script_target
+  eq("companions: split + preview opened", wins(), 3)
+  eq("companions: preview open", preview.is_open(tb), true)
+  vim.cmd("enew")
+  settle()
+  eq("companions: closed with the script", wins(), 1)
+  eq("companions: preview closed", preview.is_open(tb), false)
+  eq("companions: forgotten", script.companions[sb], nil)
+
+  -- 2. the script back in a window and compiled again reopens them
+  vim.cmd("buffer " .. sb)
+  script.run(sb)
+  eq("companions: reopened on compile", wins(), 3)
+  vim.cmd("bdelete " .. sb)
+  settle()
+  -- :bdelete closes the script's window; of the rest, the last one of the tab stays
+  eq("companions: closed on :bdelete, tab kept", { wins(), vim.api.nvim_get_current_buf() }, { 1, tb })
+
+  -- 3. a window the user opened on the .puml stays (only the preview we opened goes)
+  vim.cmd("edit " .. vim.fn.fnameescape(dir .. "/c.puml"))
+  local own = vim.api.nvim_get_current_win()
+  vim.cmd("split " .. vim.fn.fnameescape(dir .. "/c.pus"))
+  sb = vim.api.nvim_get_current_buf()
+  script.run(sb)
+  tb = vim.b[sb].puml_script_target
+  eq("companions: no extra split when the .puml is shown", wins(), 3)
+  vim.cmd("close")
+  settle()
+  eq("companions: the user's window stays", vim.api.nvim_win_is_valid(own) and vim.api.nvim_win_get_buf(own) == tb, true)
+  eq("companions: our preview still closes", preview.is_open(tb), false)
+
+  -- 4. unsaved edits in the .puml: keep its window
+  vim.cmd("silent! only")
+  vim.cmd("edit " .. vim.fn.fnameescape(dir .. "/c.pus"))
+  vim.cmd("bwipeout! " .. tb)
+  sb = vim.api.nvim_get_current_buf()
+  script.run(sb)
+  tb = vim.b[sb].puml_script_target
+  local split = script.companions[sb].win
+  vim.api.nvim_buf_set_lines(tb, -1, -1, false, { "' edited" })
+  vim.cmd("enew")
+  settle()
+  eq("companions: edited .puml keeps its window", vim.api.nvim_win_is_valid(split) and vim.api.nvim_win_get_buf(split) == tb, true)
+  eq("companions: kept while the .puml is edited", script.companions[sb] ~= nil, true)
+  -- saved, then the script closed again: now they go
+  vim.bo[tb].modified = false
+  vim.cmd("buffer " .. sb)
+  vim.cmd("enew")
+  settle()
+  eq("companions: closed once the .puml is saved", vim.api.nvim_win_is_valid(split), false)
+  vim.cmd("tabclose!")
+
+  -- 5. :q in the script closes the splits first, so the same :q closes the whole tab
+  local tabs = #vim.api.nvim_list_tabpages()
+  vim.cmd("tabnew " .. vim.fn.fnameescape(dir .. "/c.pus"))
+  sb = vim.api.nvim_get_current_buf()
+  script.run(sb)
+  split = script.companions[sb].win
+  eq("companions: 3 windows before :q", wins(), 3)
+  vim.cmd("quit")
+  eq("companions: :q closed the tab", #vim.api.nvim_list_tabpages(), tabs)
+  eq("companions: split gone after :q", vim.api.nvim_win_is_valid(split), false)
+
+  -- 6. :q that would quit Neovim but can't (another buffer has unsaved changes): keep them
+  vim.cmd("tabnew " .. vim.fn.fnameescape(dir .. "/c.pus"))
+  sb = vim.api.nvim_get_current_buf()
+  script.run(sb)
+  vim.cmd("silent! tabonly")
+  -- earlier tests leave unsaved buffers behind: set them aside for this check
+  local dirty = vim.tbl_filter(function(b)
+    return vim.api.nvim_buf_is_loaded(b) and vim.bo[b].modified
+  end, vim.api.nvim_list_bufs())
+  for _, b in ipairs(dirty) do
+    vim.bo[b].modified = false
+  end
+  local other = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_buf_set_lines(other, 0, -1, false, { "unsaved" })
+  eq("companions: :q would fail with an unsaved buffer", script._quit_would_fail(sb), true)
+  vim.bo[other].modified = false
+  eq("companions: :q would quit otherwise", script._quit_would_fail(sb), false)
+  vim.cmd("split")
+  eq("companions: :q only closes a window when another stays", script._quit_would_fail(sb), false)
+  vim.cmd("close")
+  vim.api.nvim_buf_delete(other, { force = true })
+  for _, b in ipairs(dirty) do
+    vim.bo[b].modified = true
+  end
+  script.close_companions(sb, true)
+  vim.fn.delete(dir, "rf")
 end
 
 print(string.format("\n%d passed, %d failed", passes, fails))
