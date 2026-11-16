@@ -155,6 +155,49 @@ end)
 local ptxt = table.concat(vim.api.nvim_buf_get_lines(s.pbuf, 0, -1, false), "\n")
 eq("preview image path", ptxt:find("diagram%-" .. buf .. "%-2%.png") ~= nil, true)
 eq("preview image size", ptxt:find("Size:") ~= nil, true)
+-- gx opens the image from any line of the preview (not just the path line)
+do
+  local opened
+  local orig = vim.ui.open
+  vim.ui.open = function(p)
+    opened = p
+    return nil, nil
+  end
+  local pw = vim.api.nvim_get_current_win()
+  vim.api.nvim_set_current_win(s.win)
+  vim.api.nvim_win_set_cursor(s.win, { 1, 0 })
+  local ok, err = pcall(vim.api.nvim_feedkeys, "gx", "x", false)
+  vim.api.nvim_set_current_win(pw)
+  vim.ui.open = orig
+  eq("preview gx ok", ok and true or err, true)
+  eq("preview gx opens image", opened, s.last_image)
+  eq("preview gx image is png", opened and opened:find("diagram%-" .. buf .. "%-2%.png$") ~= nil, true)
+  eq("preview winbar lists gx", vim.wo[s.win].winbar:find("gx open", 1, true) ~= nil, true)
+  -- switching to text mode drops the image right away, before the render finishes
+  local notify = util.notify
+  local warned
+  util.notify = function(msg)
+    warned = msg
+  end
+  opened = nil
+  vim.ui.open = function(p)
+    opened = p
+    return nil, nil
+  end
+  preview.set_mode(buf, "text")
+  eq("preview text mode: no image", preview.state[buf].image, nil)
+  eq("preview text mode: winbar drops gx", vim.wo[s.win].winbar:find("gx open", 1, true), nil)
+  preview.open_image(buf)
+  vim.ui.open = orig
+  util.notify = notify
+  eq("preview text mode: gx opens nothing", opened, nil)
+  eq("preview text mode: gx warns", warned and warned:find("no image", 1, true) ~= nil, true)
+  preview.state[buf].mode = nil -- back to auto, quietly
+  preview.render(buf, { force = true })
+  wait(30000, function()
+    return preview.state[buf].image ~= nil
+  end)
+end
 -- error diagnostic
 vim.api.nvim_buf_set_lines(buf, 6, 7, false, { "class Y {{{ ((" })
 preview.render(buf, { force = true })

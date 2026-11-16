@@ -18,7 +18,7 @@ DB --> API: rows               │          ╠═══════════
 
 - **Live preview** in a vertical split, re-rendered on save, on change and when the cursor moves to another diagram.
   - **text** mode: PlantUML's Unicode/ASCII output (`-tutxt` / `-ttxt`). This is great for sequence diagrams.
-  - **image** mode: renders PNG/SVG and shows the **image path** (open it with `gx`).
+  - **image** mode: renders PNG/SVG and shows the **image path** (open it with `gx` from any line).
   - **auto** mode (default): sequence diagrams use text and every other diagram type uses image. You can configure this per type.
 - **All diagram types**: sequence, class, activity, usecase, component/deployment, state, object, mindmap, wbs, gantt. The type is detected from the source.
 - **Insert elements** from a per-type catalog (participants, messages, classes, relations, actions, notes …). Elements are inserted as snippets via `vim.snippet`, so you can `<Tab>` through the placeholders. Only what fits the grammar where the new line goes is offered:
@@ -117,7 +117,7 @@ Every picker (the menu, insert, connect, wrap, templates) uses the same popup, i
 
 Text objects for the enclosing block (`loop…end`, `if…endif`, `{…}`, …) are opt-in: `keymaps = { textobjects = { inner = "iu", outer = "au" } }`.
 
-In the preview window (its winbar lists these keys on the right): `?` or `<CR>` opens the menu, `q` closes the preview, `r` re-renders, `m` cycles the mode, and `gx` on an image path opens the image.
+In the preview window (its winbar lists these keys on the right): `?` or `<CR>` opens the menu, `q` closes the preview, `r` re-renders, `m` cycles the mode, and `gx` opens the image (from any line, in image mode).
 
 ## Configuration
 

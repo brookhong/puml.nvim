@@ -61,12 +61,13 @@ local function set_lines(pbuf, lines)
   vim.bo[pbuf].modified = false
 end
 
--- the preview's own keys, right-aligned after the status text
+-- the preview's own keys, right-aligned after the status text (`gx` only when there is an image)
 local KEYS = "%=%#Comment# ? menu  q close  r render  m mode "
+local KEYS_IMAGE = KEYS .. " gx open "
 
 local function set_winbar(s, text, hl)
   if valid_win(s.win) then
-    vim.wo[s.win].winbar = "%#" .. (hl or "WinBar") .. "#" .. text:gsub("%%", "%%%%") .. KEYS
+    vim.wo[s.win].winbar = "%#" .. (hl or "WinBar") .. "#" .. text:gsub("%%", "%%%%") .. (s.image and KEYS_IMAGE or KEYS)
   end
 end
 
@@ -106,7 +107,26 @@ local function create_pbuf(buf)
       require("puml.menu").open(buf)
     end, vim.tbl_extend("force", o, { desc = "puml menu" }))
   end
+  vim.keymap.set("n", "gx", function()
+    M.open_image(buf)
+  end, vim.tbl_extend("force", o, { desc = "Open the preview image" }))
   return pbuf
+end
+
+--- Open the image the preview shows, from any line of the preview.
+function M.open_image(buf)
+  local s = M.state[buf]
+  local path = s and s.image
+  if not path then
+    return util.notify("no image to open (the preview is not in image mode)", vim.log.levels.WARN)
+  end
+  if vim.fn.filereadable(path) == 0 then
+    return util.notify("image not found: " .. path, vim.log.levels.WARN)
+  end
+  local _, err = vim.ui.open(path)
+  if err then
+    util.notify(err, vim.log.levels.ERROR)
+  end
 end
 
 function M.open(buf)
@@ -193,6 +213,9 @@ function M.render(buf, opts)
     return
   end
   local mode = M.resolve_mode(buf, d.type)
+  if mode ~= "image" then
+    s.image = nil -- don't offer the previous image while text is rendering
+  end
   local key = table.concat(d.input, "\n") .. "\0" .. mode
   if not opts.force and key == s.key then
     return
@@ -233,6 +256,13 @@ function M.render(buf, opts)
       return
     end
     set_diagnostics(buf, d, res.err)
+    -- the image `gx` opens: this render's, or the last good one after an error
+    if mode == "image" then
+      s.last_image = not res.err and res.path or s.last_image
+      s.image = s.last_image
+    else
+      s.image = nil
+    end
     local stamp = os.date("%H:%M:%S")
     if res.err then
       local row = res.err.line and (d.base + res.err.line)
@@ -261,7 +291,6 @@ function M.render(buf, opts)
           table.insert(lines, "  " .. s.last_image)
         end
       else
-        s.last_image = res.path
         table.insert(lines, "  Image (" .. d.type .. ", " .. fmt .. "):")
         table.insert(lines, "")
         table.insert(lines, "  " .. res.path)
@@ -272,7 +301,7 @@ function M.render(buf, opts)
         end
         table.insert(lines, "  Rendered: " .. stamp .. " (" .. res.ms .. "ms)")
         table.insert(lines, "")
-        table.insert(lines, "  Tip: `gx` on the path opens it, `m` cycles preview mode.")
+        table.insert(lines, "  Tip: `gx` (on any line) opens it, `m` cycles preview mode.")
       end
       set_lines(s.pbuf, lines)
     end
