@@ -125,7 +125,7 @@ function M.open(buf)
   local w = config.options.preview.width
   local width = w > 1 and math.floor(w) or math.floor(vim.o.columns * w)
   s.win = vim.api.nvim_open_win(s.pbuf, false, { split = "right", win = src_win, width = width })
-  local wo = vim.wo[s.win]
+  local wo = vim.wo[s.win][0]
   wo.number, wo.relativenumber, wo.wrap, wo.list = false, false, false, false
   wo.signcolumn, wo.foldcolumn, wo.spell, wo.cursorline = "no", "0", false, false
   wo.winfixwidth = true
