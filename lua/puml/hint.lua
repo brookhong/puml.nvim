@@ -3,7 +3,8 @@
 -- wraps the selection. Labels are drawn from `picker.selection_keys`: keys of little
 -- use in linewise visual (in-line and word motions, q, m, z), never the ones that
 -- extend or act on a selection, so j/k/G/{/} and y/d/c/>/... keep working. In
--- charwise/blockwise visual the hint is passive and `<leader>u` + label picks.
+-- charwise/blockwise visual the hint is passive and `<leader>u` + label picks (not
+-- shown in markdown, which has no `<leader>u`).
 local config = require("puml.config")
 
 local M = {}
@@ -167,6 +168,11 @@ function M.update(buf)
     return M.close()
   end
   if not VISUAL[api.nvim_get_mode().mode] or api.nvim_get_current_buf() ~= buf then
+    return M.close()
+  end
+  -- charwise/blockwise the hint is passive ("<leader>u + key"): markdown buffers don't map
+  -- that key, so only linewise (live labels) is offered there
+  if api.nvim_get_mode().mode ~= "V" and require("puml.util").is_markdown(buf) then
     return M.close()
   end
   local s, e = vim.fn.line("v"), vim.fn.line(".")

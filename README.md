@@ -37,7 +37,7 @@ DB --> API: rows               │          ╠═══════════
 - **Errors as diagnostics**, mapped back to the right buffer line.
 - **Templates** for new diagrams, plus **export** to png/svg/txt/pdf/…. Each template uses every element of its diagram type, with section comments, so you start from a diagram that renders and delete what you don't need.
 - **puml script** (`.pus`): an indentation-based shorthand for sequence and activity diagrams that compiles to PlantUML. There are no `end`/`endif` to balance, the same `if/elif/else`, `while`, `parallel` work in both diagram types, and errors come with line numbers. `:PumlScript` compiles it and shows the result with its preview (saving recompiles it; closing the script closes them again). In a PlantUML buffer, `:PumlScript` converts the diagram the other way, to a `.pus` script. `nvim -l scripts/pus2puml.lua FILE` does either from the shell, depending on the input. `.pus` files get syntax highlighting (including the PlantUML inside `plantuml:` lines) and Python-style auto-indent. See [docs/script.md](docs/script.md).
-- **Markdown**: works inside ```` ```plantuml ```` / ```` ```puml ```` fences.
+- **Markdown**: works inside ```` ```plantuml ```` / ```` ```puml ```` fences. Markdown buffers get no mappings (`<leader>u` and the text objects would cover the whole file): use `:PumlMenu`. Selecting lines in a fence with `V` still shows the wrap hint with its labels.
 - **Completion**: an nvim-cmp source (`puml`) for names and snippets, and an omnifunc for names.
 - Local `plantuml` command **or** a PlantUML server (picoweb / plantuml-server) via curl.
 
@@ -78,7 +78,7 @@ lazy.nvim:
 | `:PumlExport [fmt]` | Export the diagram under the cursor next to the file |
 | `:PumlScript` | In a `.pus` buffer: compile it to `FILE.puml` and preview it (both close with the script). In a PlantUML buffer: convert the diagram to `FILE.pus` |
 
-**There is one mapping: `<leader>u`** (normal and visual mode). It opens a menu of the actions that make sense at the cursor:
+**There is one mapping: `<leader>u`** (normal and visual mode; not in markdown, where `:PumlMenu` does the same). It opens a menu of the actions that make sense at the cursor:
 
 ```
 ╭──────── puml · sequence ────────╮
@@ -111,7 +111,7 @@ Each block has a short description of what it means. The value you will be asked
 
 When nothing fits, the hint says why, e.g. ``✗ the selection cuts `loop retry` (line 3) in half``. PlantUML itself accepts most broken nestings without complaint, so these checks are puml.nvim's own. Every combination they allow was also rendered with PlantUML to make sure none of them is a syntax error.
 
-The labels only use keys that are of little use in linewise visual mode: in-line motions such as `h`/`l`/`f`/`t`, word motions, `q`, `m` and `z` (`picker.selection_keys`, default `lhwebftqmzWBEFTQK`). So `j`/`k`/`G`/`{`/`}`/`o`, `y`/`d`/`c`/`>`/`<`/`=`, `:` and text objects all keep working. The label mappings only exist while the hint is shown, and any buffer-local mapping they cover is put back afterwards. In charwise/blockwise visual mode (`v`, `<C-v>`) the hint is passive: there, `<leader>u` + label picks. Turn the hint off with `picker = { selection_hint = false }`.
+The labels only use keys that are of little use in linewise visual mode: in-line motions such as `h`/`l`/`f`/`t`, word motions, `q`, `m` and `z` (`picker.selection_keys`, default `lhwebftqmzWBEFTQK`). So `j`/`k`/`G`/`{`/`}`/`o`, `y`/`d`/`c`/`>`/`<`/`=`, `:` and text objects all keep working. The label mappings only exist while the hint is shown, and any buffer-local mapping they cover is put back afterwards. In charwise/blockwise visual mode (`v`, `<C-v>`) the hint is passive: there, `<leader>u` + label picks (in markdown it isn't shown, as there is no `<leader>u`). Turn the hint off with `picker = { selection_hint = false }`.
 
 Every picker (the menu, insert, connect, wrap, templates) uses the same popup, in which every choice has a **one-key label**, like foyer.nvim's. Labels are mnemonic where possible (`m` message, `r` reply message, `u` User) and don't change while you filter. `/` filters by words, `<CR>` picks the only match left, and `<Esc>` clears the filter or closes the popup. Set `picker = { ui = "select" }` to use `vim.ui.select` (telescope, fzf-lua, …) instead.
 

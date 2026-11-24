@@ -106,6 +106,18 @@ vim.api.nvim_buf_set_lines(md, 0, -1, false, { "# t", "```plantuml", "Alice -> B
 eq("md out", util.current(md, 1), nil)
 local dm = util.current(md, 3)
 eq("md 1", { dm.index, dm.type, dm.body_s, dm.wrapped, dm.base }, { 1, "sequence", 3, true, 2 })
+-- markdown buffers get no mappings: they would cover the whole file, not just the fences
+do
+  local function puml_maps(mode)
+    return #vim.tbl_filter(function(m)
+      return (m.desc or ""):match("^puml: ") ~= nil
+    end, vim.api.nvim_buf_get_keymap(md, mode))
+  end
+  require("puml").attach(md)
+  eq("md attached", vim.b[md].puml_attached, true)
+  eq("md: no normal-mode mappings", puml_maps("n"), 0)
+  eq("md: no visual/operator mappings", { puml_maps("x"), puml_maps("o") }, { 0, 0 })
+end
 local dm2 = util.current(md, 8)
 eq("md 2", { dm2.index, dm2.type, dm2.s, dm2.body_s, dm2.base }, { 2, "state", 7, 8, 7 })
 
@@ -480,6 +492,30 @@ do
   key("j")
   eq("charwise: hint without live labels", { hint() ~= nil, xmaps() }, { true, 0 })
   key("<Esc>")
+  -- markdown: linewise hint (live labels) in a fence, no passive charwise one (no <leader>u)
+  do
+    local mb = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_set_current_buf(mb)
+    vim.bo[mb].filetype = "markdown"
+    vim.api.nvim_buf_set_lines(mb, 0, -1, false, { "# t", "```plantuml", "A -> B: x", "B --> A: y", "```" })
+    local function mkey(k)
+      vim.api.nvim_feedkeys(vim.keycode(k), "x", false)
+      vim.api.nvim_exec_autocmds("CursorMoved", { buffer = mb })
+      vim.wait(30, function() return false end)
+    end
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    mkey("V")
+    mkey("j")
+    eq("markdown: linewise hint in a fence", hint() ~= nil, true)
+    mkey("<Esc>")
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    mkey("v")
+    mkey("j")
+    eq("markdown: no charwise hint", hint(), nil)
+    mkey("<Esc>")
+    vim.api.nvim_set_current_buf(wb)
+    vim.api.nvim_buf_delete(mb, { force = true })
+  end
   -- turning the hint off later (e.g. a second setup()) takes effect without re-attaching
   cfg.picker.selection_hint = false
   vim.api.nvim_win_set_cursor(0, { 3, 0 })

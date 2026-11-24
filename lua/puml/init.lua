@@ -44,8 +44,10 @@ function M.attach(buf, force)
     vim.bo[buf].omnifunc = "v:lua.require'puml.complete'.omnifunc"
   end
 
-  -- One key: the menu of everything that makes sense at the cursor / selection.
-  local km = config.options.keymaps
+  -- One key: the menu of everything that makes sense at the cursor / selection. Not in
+  -- markdown: buffer-local maps cover the whole file, not just its PlantUML fences, and
+  -- would hide the user's own <leader>u (and iu/au) everywhere else (use :PumlMenu).
+  local km = not util.is_markdown(buf) and config.options.keymaps or nil
   if km and km.menu then
     local menu = require("puml.menu")
     map(buf, "n", km.menu, function() menu.open(buf) end, "menu")
